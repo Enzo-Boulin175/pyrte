@@ -218,20 +218,3 @@ class RTEClient(httpx.Client):
             return pd.Series()
         else:
             return dfs[0]
-
-
-if __name__ == "__main__":
-    api_creds = {
-        APIService.short_term_consumption: {
-            "client_id": "6a4825cb-10b9-4759-93f9-8f946879e212",
-            "client_secret": "7203ec04-a36e-49e5-b858-1af16e1562aa",
-        }
-    }
-    client = RTEClient(api_creds)
-
-    start = pd.Timestamp("2025-01-01", tz=TZ)
-    end = start + pd.DateOffset(days=3)
-    print("Fetching data from", start.tz_convert("UTC"), "to", end.tz_convert("UTC"))
-    ts = client.get_short_term_consumption(start, end, PrevisionType.D_MINUS_2)
-    print(ts)
-    breakpoint()
