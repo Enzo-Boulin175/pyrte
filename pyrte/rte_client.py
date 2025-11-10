@@ -3,10 +3,11 @@ from collections.abc import Generator
 from enum import Enum
 from typing import Any
 
-import config
 import httpx
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
+
+import pyrte.config
 
 TZ = "CET"
 
@@ -71,7 +72,7 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 
 class RTEAuth(httpx.Auth):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_url = config.TOKEN_URL
+    token_url = pyrte.config.TOKEN_URL
 
     def __init__(self, api_creds: dict[APIService, dict[str, str]]):
         self.tokens = {}
@@ -129,7 +130,7 @@ class RTEClient(httpx.Client):
         self,
         api_creds: dict[APIService, dict[str, str]],
         *,
-        base_url: str = config.RTE_BASE_URL,
+        base_url: str = pyrte.config.RTE_BASE_URL,
         **kwargs: Any,
     ):
         auth = RTEAuth(api_creds)
@@ -144,29 +145,31 @@ class RTEClient(httpx.Client):
             **kwargs,
         )
 
-    def get_short_term_consumptions(
+    def get_short_term_consumption(
         self,
         start: pd.Timestamp,
         end: pd.Timestamp,
-        types: PrevisionType | list[PrevisionType] | None = None,
+        prevision_type: PrevisionType,
         freq: str = "15min",
-    ) -> pd.DataFrame:
+    ) -> pd.Series:
         """
         French load data (15Mmin), can be forecast or realised based on the PrevisionType.
-        RTE only sends data for the whole day so we have to cut ourself.
+        NB:
+        - RTE only sends data for the whole day so we have to cut ourself.
+
+        - Although we could fetch multiple types at the same time, it feels useless so i just implemented for one.
         """
         # TODO: Cette erreur est générée si la période demandée est supérieure à 186 jours.
         # TODO: Cette erreur est générée si l’intervalle de temps entre start_date et end_date est inférieur 1 jour calendaire.
         if start.tzinfo is None or end.tzinfo is None:
             raise ValueError("start and end timestamps must be timezone-aware")
 
-        params = {}
-        if types:
-            if isinstance(types, list):
-                params["type"] = ",".join(types)
-            else:
-                params["type"] = types.value
+        params: dict[str, str] = {}
 
+        params["type"] = prevision_type.value
+
+        if prevision_type == PrevisionType.D_MINUS_2:
+            freq = "30min"
         params["start_date"] = start.floor(freq).isoformat()
         params["end_date"] = end.ceil(freq).isoformat()
 
@@ -179,11 +182,15 @@ class RTEClient(httpx.Client):
 
         data = response.json().get("short_term", [])
         if not data:
-            return pd.DataFrame()
+            return pd.Series()
 
         dfs = []
         for prevision in data:
-            prevision_type = PrevisionType(prevision.get("type"))
+            response_prevision_type = PrevisionType(prevision.get("type"))
+            if response_prevision_type != prevision_type:
+                raise ValueError(
+                    f"Wrong prevision type returned : {response_prevision_type} instead of {prevision_type}"
+                )
             values = prevision.get("values", [])
             if not values:
                 continue
@@ -191,18 +198,26 @@ class RTEClient(httpx.Client):
             df = pd.DataFrame(values, columns=["start_date", "value"])
             df["start_date"] = pd.to_datetime(df["start_date"])
             df = df.set_index("start_date", verify_integrity=True)
-            df.index = pd.DatetimeIndex(df.index, freq=freq, name="date").tz_convert(TZ)
 
-            dfs.append(df.rename(columns={"value": prevision_type.value}))
+            target_index = pd.date_range(
+                params["start_date"],
+                params["end_date"],
+                freq=freq,
+                name="date",
+                inclusive="left",
+            ).tz_convert(TZ)
+
+            try:
+                ts = df.value.reindex(target_index)
+            except Exception as e:
+                raise ValueError(f"Reindexing failed: {e}")
+
+            dfs.append(ts.rename(prevision_type.value))
 
         if dfs == []:
-            return pd.DataFrame()
-        elif len(dfs) == 1:
-            return dfs[0]
+            return pd.Series()
         else:
-            df = pd.concat(dfs, axis=1)
-
-        return df
+            return dfs[0]
 
 
 if __name__ == "__main__":
@@ -214,20 +229,9 @@ if __name__ == "__main__":
     }
     client = RTEClient(api_creds)
 
-    # consumptions = client.get_short_term_consumptions()
-    # print(consumptions)
-
-    # consumptions = client.get_short_term_consumptions(
-    #     types=["REALISED", "ID"],
-    #     start=pd.Timestamp("2025-10-01T00:00:00+02:00"),
-    #     end=pd.Timestamp("2025-10-02T00:00:00+02:00"),
-    # )
-    # print(consumptions)
-
-    # df = client.get_france_power_exchanges()
-    # print(df.head())
     start = pd.Timestamp("2025-01-01", tz=TZ)
     end = start + pd.DateOffset(days=3)
-    df = client.get_short_term_consumptions(start, end)
+    print("Fetching data from", start.tz_convert("UTC"), "to", end.tz_convert("UTC"))
+    ts = client.get_short_term_consumption(start, end, PrevisionType.D_MINUS_2)
+    print(ts)
     breakpoint()
-    # ts.to_csv("consumption_backup.csv")

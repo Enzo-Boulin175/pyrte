@@ -3,12 +3,29 @@ from unittest.mock import Mock, patch
 import httpx
 import pandas as pd
 import pytest
-import vcr
 from inline_snapshot import snapshot
 
-from pyrte.rte_client import APIService, RTEAuth, RTEClient, _basic_auth_header, Token
+from pyrte.rte_client import (
+    APIService,
+    PrevisionType,
+    RTEAuth,
+    RTEClient,
+    Token,
+    _basic_auth_header,
+)
 
 VCR_DIR = "tests/cassettes/"
+
+pytestmark = [pytest.mark.vcr]
+
+
+@pytest.fixture(scope="module")
+def vcr_config():
+    return {
+        "cassette_library_dir": VCR_DIR,
+        "filter_headers": ["authorization"],
+        "record_mode": "once",
+    }
 
 
 @pytest.fixture
@@ -63,15 +80,24 @@ def test_auth_flow(auth):
     assert request.headers["Authorization"] == "Bearer token"
 
 
-@vcr.use_cassette(f"{VCR_DIR}test_realised_consumption_one_day.yaml")
-def test_realised_consumption_one_day():
-    client = RTEClient()
+@pytest.fixture
+def client():
+    api_creds = {
+        APIService.short_term_consumption: {
+            "client_id": "6a4825cb-10b9-4759-93f9-8f946879e212",
+            "client_secret": "7203ec04-a36e-49e5-b858-1af16e1562aa",
+        }
+    }
+    return RTEClient(api_creds)
 
+
+def test_get_short_term_consumption(client):
     start = pd.Timestamp("2020-01-01", tz="CET")
     end = start + pd.DateOffset(days=1)
-    ts = client.get_realised_consumption(start, end)
+    ts = client.get_short_term_consumption(start, end, PrevisionType.REALISED)
 
-    str(ts) == snapshot("""\
+    assert str(ts) == snapshot("""\
+date
 2020-01-01 00:00:00+01:00    65827
 2020-01-01 00:15:00+01:00    65887
 2020-01-01 00:30:00+01:00    64773
@@ -83,5 +109,5 @@ def test_realised_consumption_one_day():
 2020-01-01 23:15:00+01:00    63319
 2020-01-01 23:30:00+01:00    62808
 2020-01-01 23:45:00+01:00    63322
-Freq: 15min, Name: value, Length: 96, dtype: int64\
+Freq: 15min, Name: REALISED, Length: 96, dtype: int64\
 """)
