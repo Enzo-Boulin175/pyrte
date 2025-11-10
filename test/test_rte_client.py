@@ -13,10 +13,13 @@ VCR_DIR = "tests/cassettes/"
 
 @pytest.fixture
 def auth():
-    service_creds = {
-        APIService.consumption: {"client_id": "id", "client_secret": "secret"}
+    api_creds = {
+        APIService.short_term_consumption: {
+            "client_id": "id",
+            "client_secret": "secret",
+        }
     }
-    return RTEAuth(service_creds)
+    return RTEAuth(api_creds)
 
 
 @patch("httpx.post")
@@ -31,7 +34,7 @@ def test_refresh_token(mock_post, auth):
     mock_response.status_code = 200
     mock_post.return_value = mock_response
 
-    token = auth.refresh_token(auth.tokens[APIService.consumption])
+    token = auth.refresh_token(auth.tokens[APIService.short_term_consumption])
 
     mock_post.assert_called_once_with(
         auth.token_url,
@@ -49,7 +52,7 @@ def test_refresh_token(mock_post, auth):
 
 def test_auth_flow(auth):
     request = Mock(spec=httpx.Request)
-    request.extensions = {"service": APIService.consumption}
+    request.extensions = {"service": APIService.short_term_consumption}
     request.headers = {}
     token = Token(
         token_url="url", client_id="id", client_secret="secret", token="token"

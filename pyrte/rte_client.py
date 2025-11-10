@@ -1,17 +1,27 @@
 import base64
 from collections.abc import Generator
 from enum import Enum
+from typing import Any
 
+import config
 import httpx
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
-import pyrte.config as config
+TZ = "CET"
 
 
 class APIService(str, Enum):
     wholesale_market = "wholesale_market"
-    consumption = "consumption"
+    short_term_consumption = "short_term_consumption"
+
+
+class PrevisionType(str, Enum):
+    REALISED = "REALISED"
+    CORRECTED = "CORRECTED"
+    ID = "ID"
+    D_MINUS_1 = "D-1"
+    D_MINUS_2 = "D-2"
 
 
 class Token(BaseModel):
@@ -63,10 +73,10 @@ class RTEAuth(httpx.Auth):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     token_url = config.TOKEN_URL
 
-    def __init__(self, service_creds: dict[APIService, dict[str, str]]):
+    def __init__(self, api_creds: dict[APIService, dict[str, str]]):
         self.tokens = {}
         for service in APIService:
-            creds = service_creds.get(service, None)
+            creds = api_creds.get(service, None)
             self.tokens[service] = (
                 Token(
                     token_url=self.token_url,
@@ -113,4 +123,104 @@ class RTEAuth(httpx.Auth):
 
 
 class RTEClient(httpx.Client):
-    pass
+    default_timeout = httpx.Timeout(60, connect=20)
+
+    def __init__(
+        self,
+        api_creds: dict[APIService, dict[str, str]],
+        *,
+        base_url: str = config.RTE_BASE_URL,
+        **kwargs: Any,
+    ):
+        auth = RTEAuth(api_creds)
+
+        event_hooks = kwargs.get(
+            "event_hooks", {"response": [_check_response_status_code]}
+        )
+        super().__init__(
+            base_url=base_url,
+            auth=auth,
+            event_hooks=event_hooks,
+            **kwargs,
+        )
+
+    def get_short_term_consumptions(
+        self,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+        types: PrevisionType | list[PrevisionType] | None = None,
+        freq: str = "15min",
+    ) -> dict[PrevisionType, pd.Series]:
+        """
+        French load data (15Mmin), can be forecast or realised based on the PrevisionType.
+        RTE only sends data for the whole day so we have to cut ourself.
+        """
+        # TODO: Cette erreur est générée si la période demandée est supérieure à 186 jours.
+        # TODO: Cette erreur est générée si l’intervalle de temps entre start_date et end_date est inférieur 1 jour calendaire.
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("start and end timestamps must be timezone-aware")
+
+        params = {}
+        if types:
+            if isinstance(types, list):
+                params["type"] = ",".join(types)
+            else:
+                params["type"] = types.value
+
+        params["start_date"] = start.floor(freq).isoformat()
+        params["end_date"] = end.ceil(freq).isoformat()
+
+        url = f"{self.base_url}open_api/consumption/v1/short_term"
+        response = self.get(
+            url,
+            params=params,
+            extensions={"service": APIService.short_term_consumption},
+        )
+
+        data = response.json().get("short_term", [])
+        if not data:
+            return {}
+
+        previsions = {}
+        for prevision in data:
+            prevision_type = PrevisionType(prevision.get("type"))
+            values = prevision.get("values", [])
+            if not values:
+                continue
+
+            df = pd.DataFrame(values, columns=["start_date", "value"])
+            df["start_date"] = pd.to_datetime(df["start_date"])
+            df = df.set_index("start_date", verify_integrity=True)
+            df.index = pd.DatetimeIndex(df.index, freq=freq, name="date").tz_convert(TZ)
+
+            previsions[prevision_type] = df.value
+
+        return previsions
+
+
+if __name__ == "__main__":
+    api_creds = {
+        APIService.short_term_consumption: {
+            "client_id": "6a4825cb-10b9-4759-93f9-8f946879e212",
+            "client_secret": "7203ec04-a36e-49e5-b858-1af16e1562aa",
+        }
+    }
+    client = RTEClient(api_creds)
+
+    # consumptions = client.get_short_term_consumptions()
+    # print(consumptions)
+
+    # consumptions = client.get_short_term_consumptions(
+    #     types=["REALISED", "ID"],
+    #     start=pd.Timestamp("2025-10-01T00:00:00+02:00"),
+    #     end=pd.Timestamp("2025-10-02T00:00:00+02:00"),
+    # )
+    # print(consumptions)
+
+    # df = client.get_france_power_exchanges()
+    # print(df.head())
+    start = pd.Timestamp("2025-01-01", tz=TZ)
+    end = start + pd.DateOffset(days=3)
+    data = client.get_short_term_consumptions(start, end, PrevisionType.REALISED)
+    breakpoint()
+    # ts.to_csv("consumption_backup.csv")
