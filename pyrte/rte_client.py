@@ -7,9 +7,9 @@ import httpx
 import pandas as pd
 from pydantic import BaseModel, ConfigDict
 
-import pyrte.config
-
 TZ = "CET"
+BASE_URL: str = "https://digital.iservices.rte-france.com/"
+TOKEN_URL = "https://digital.iservices.rte-france.com/token/oauth/"
 
 
 class APIService(str, Enum):
@@ -72,7 +72,7 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 
 class RTEAuth(httpx.Auth):
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-    token_url = pyrte.config.TOKEN_URL
+    token_url = TOKEN_URL
 
     def __init__(self, api_creds: dict[APIService, dict[str, str]]):
         self.tokens = {}
@@ -130,7 +130,7 @@ class RTEClient(httpx.Client):
         self,
         api_creds: dict[APIService, dict[str, str]],
         *,
-        base_url: str = pyrte.config.RTE_BASE_URL,
+        base_url: str = BASE_URL,
         **kwargs: Any,
     ):
         auth = RTEAuth(api_creds)
