@@ -150,7 +150,7 @@ class RTEClient(httpx.Client):
         end: pd.Timestamp,
         types: PrevisionType | list[PrevisionType] | None = None,
         freq: str = "15min",
-    ) -> dict[PrevisionType, pd.Series]:
+    ) -> pd.DataFrame:
         """
         French load data (15Mmin), can be forecast or realised based on the PrevisionType.
         RTE only sends data for the whole day so we have to cut ourself.
@@ -179,9 +179,9 @@ class RTEClient(httpx.Client):
 
         data = response.json().get("short_term", [])
         if not data:
-            return {}
+            return pd.DataFrame()
 
-        previsions = {}
+        dfs = []
         for prevision in data:
             prevision_type = PrevisionType(prevision.get("type"))
             values = prevision.get("values", [])
@@ -193,9 +193,16 @@ class RTEClient(httpx.Client):
             df = df.set_index("start_date", verify_integrity=True)
             df.index = pd.DatetimeIndex(df.index, freq=freq, name="date").tz_convert(TZ)
 
-            previsions[prevision_type] = df.value
+            dfs.append(df.rename(columns={"value": prevision_type.value}))
 
-        return previsions
+        if dfs == []:
+            return pd.DataFrame()
+        elif len(dfs) == 1:
+            return dfs[0]
+        else:
+            df = pd.concat(dfs, axis=1)
+
+        return df
 
 
 if __name__ == "__main__":
@@ -221,6 +228,6 @@ if __name__ == "__main__":
     # print(df.head())
     start = pd.Timestamp("2025-01-01", tz=TZ)
     end = start + pd.DateOffset(days=3)
-    data = client.get_short_term_consumptions(start, end, PrevisionType.REALISED)
+    df = client.get_short_term_consumptions(start, end)
     breakpoint()
     # ts.to_csv("consumption_backup.csv")
