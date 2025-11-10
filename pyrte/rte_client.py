@@ -1,9 +1,10 @@
 import base64
-from dataclasses import dataclass
+from collections.abc import Generator
 from enum import Enum
 
 import httpx
 import pandas as pd
+from pydantic import BaseModel, ConfigDict
 
 import pyrte.config as config
 
@@ -13,14 +14,15 @@ class APIService(str, Enum):
     consumption = "consumption"
 
 
-@dataclass
-class TokenManager:
+class Token(BaseModel):
     token_url: str
     client_id: str
     client_secret: str
 
     token: str | None = None
     expires_at: pd.Timestamp | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class RTEError(Exception):
@@ -65,13 +67,17 @@ class RTEAuth(httpx.Auth):
         self.tokens = {}
         for service in APIService:
             creds = service_creds.get(service, None)
-            self.tokens[service] = creds or TokenManager(
-                token_url=self.token_url,
-                client_id=creds["client_id"],
-                client_secret=creds["client_secret"],
+            self.tokens[service] = (
+                Token(
+                    token_url=self.token_url,
+                    client_id=creds["client_id"],
+                    client_secret=creds["client_secret"],
+                )
+                if creds is not None
+                else None
             )
 
-    def refresh_token(self, token: TokenManager) -> TokenManager:
+    def refresh_token(self, token: Token) -> Token:
         response = httpx.post(
             self.token_url,
             headers=self.headers
@@ -89,8 +95,10 @@ class RTEAuth(httpx.Auth):
         )
         return token
 
-    def auth_flow(self, request):
-        # Send the request, with a custom `X-Authentication` header.
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response, None]:
+        # Send the request, with a custom "Authorization" header.
         service = request.extensions["service"]
         token = self.tokens[service]
         if token is None:
