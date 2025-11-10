@@ -5,7 +5,7 @@ from enum import Enum
 import httpx
 import pandas as pd
 
-import config
+import pyrte.config as config
 
 
 class APIService(str, Enum):
@@ -102,3 +102,7 @@ class RTEAuth(httpx.Auth):
 
         request.headers["Authorization"] = f"Bearer {token.token}"
         yield request
+
+
+class RTEClient(httpx.Client):
+    pass

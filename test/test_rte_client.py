@@ -1,10 +1,49 @@
+from unittest.mock import Mock, patch
+
+import httpx
 import pandas as pd
+import pytest
 import vcr
 from inline_snapshot import snapshot
 
-from rte_client import RTEClient
+from pyrte.rte_client import APIService, RTEAuth, RTEClient, _basic_auth_header
 
 VCR_DIR = "tests/cassettes/"
+
+
+@pytest.fixture
+def auth():
+    service_creds = {
+        APIService.consumption: {"client_id": "id", "client_secret": "secret"}
+    }
+    return RTEAuth(service_creds)
+
+
+@patch("httpx.post")
+def test_refresh_token(mock_post, auth):
+    mock_response = Mock(spec=httpx.Response)
+    token_json = {
+        "access_token": "fake_token",
+        "token_type": "Bearer",
+        "expires_in": 10,
+    }
+    mock_response.json.return_value = token_json
+    mock_post.return_value = mock_response
+
+    result = auth.refresh_token(auth.tokens[APIService.consumption])
+
+    mock_post.assert_called_once_with(
+        auth.token_url,
+        headers={**auth.headers, "Authorization": _basic_auth_header("id", "secret")},
+    )
+    assert result.token == token_json.get("access_token")
+
+
+def test_auth_flow():
+    service_creds = {
+        APIService.consumption: {"client_id": "id", "client_secret": "secret"}
+    }
+    auth = RTEAuth(service_creds)
 
 
 @vcr.use_cassette(f"{VCR_DIR}test_realised_consumption_one_day.yaml")
