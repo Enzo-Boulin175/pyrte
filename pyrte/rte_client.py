@@ -150,7 +150,6 @@ class RTEClient(httpx.Client):
         start: pd.Timestamp,
         end: pd.Timestamp,
         prevision_type: PrevisionType,
-        freq: str = "15min",
     ) -> pd.Series:
         """
         French load data (15Mmin), can be forecast or realised based on the PrevisionType.
@@ -168,8 +167,8 @@ class RTEClient(httpx.Client):
 
         params["type"] = prevision_type.value
 
-        if prevision_type == PrevisionType.D_MINUS_2:
-            freq = "30min"
+        freq = "15min" if prevision_type != PrevisionType.D_MINUS_2 else "30min"
+
         params["start_date"] = start.floor(freq).isoformat()
         params["end_date"] = end.ceil(freq).isoformat()
 

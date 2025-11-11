@@ -84,8 +84,8 @@ def test_auth_flow(auth):
 def client():
     api_creds = {
         APIService.short_term_consumption: {
-            "client_id": "6a4825cb-10b9-4759-93f9-8f946879e212",
-            "client_secret": "7203ec04-a36e-49e5-b858-1af16e1562aa",
+            "client_id": "id",
+            "client_secret": "secret",
         }
     }
     return RTEClient(api_creds)
