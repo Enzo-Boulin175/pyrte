@@ -158,8 +158,9 @@ class RTEClient(httpx.Client):
 
         - Although we could fetch multiple types at the same time, it feels useless so i just implemented for one.
         """
-        # TODO: Cette erreur est générée si la période demandée est supérieure à 186 jours.
-        # TODO: Cette erreur est générée si l’intervalle de temps entre start_date et end_date est inférieur 1 jour calendaire.
+        # TODO: erreur si la période demandée est supérieure à 186 jours.
+        # TODO: erreur si l’intervalle de temps entre start_date et end_date est inférieur 1 jour calendaire.
+
         if start.tzinfo is None or end.tzinfo is None:
             raise ValueError("start and end timestamps must be timezone-aware")
 
